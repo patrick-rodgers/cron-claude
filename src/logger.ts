@@ -5,6 +5,7 @@
 
 import { createHmac } from 'crypto';
 import { execSync } from 'child_process';
+import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import matter from 'gray-matter';
 import { TaskLog, LogStep } from './types.js';
 import { getSecretKey } from './config.js';
@@ -82,8 +83,7 @@ export function saveLogToMemory(log: TaskLog): void {
   const tempFile = `${process.env.TEMP || '/tmp'}/cron-claude-log-${log.executionId}.md`;
 
   // Write to temp file
-  const fs = require('fs');
-  fs.writeFileSync(tempFile, markdown, 'utf-8');
+  writeFileSync(tempFile, markdown, 'utf-8');
 
   try {
     // Store in memory skill
@@ -99,16 +99,14 @@ export function saveLogToMemory(log: TaskLog): void {
   } catch (error) {
     console.error('Failed to save log to memory skill:', error);
     // Fallback: save to local file
-    const fs = require('fs');
     const fallbackPath = `./logs/${log.taskId}-${log.executionId}.md`;
-    fs.mkdirSync('./logs', { recursive: true });
-    fs.writeFileSync(fallbackPath, markdown, 'utf-8');
+    mkdirSync('./logs', { recursive: true });
+    writeFileSync(fallbackPath, markdown, 'utf-8');
     console.log(`✓ Saved log to fallback location: ${fallbackPath}`);
   } finally {
     // Clean up temp file
     try {
-      const fs = require('fs');
-      fs.unlinkSync(tempFile);
+      unlinkSync(tempFile);
     } catch {}
   }
 }

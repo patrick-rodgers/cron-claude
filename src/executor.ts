@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import matter from 'gray-matter';
 import { TaskDefinition, ExecutionResult, TaskLog } from './types.js';
 import { createLog, addLogStep, finalizeLog } from './logger.js';
@@ -42,8 +42,7 @@ async function executeViaCLI(
     try {
       // Create a temporary file with the instructions
       const tempFile = `${process.env.TEMP || '/tmp'}/cron-claude-task-${task.id}-${Date.now()}.md`;
-      const fs = require('fs');
-      fs.writeFileSync(tempFile, task.instructions, 'utf-8');
+      writeFileSync(tempFile, task.instructions, 'utf-8');
 
       addLogStep(log, 'Created temporary task file', tempFile);
 
@@ -73,7 +72,7 @@ async function executeViaCLI(
       claude.on('close', (code) => {
         // Clean up temp file
         try {
-          fs.unlinkSync(tempFile);
+          unlinkSync(tempFile);
           addLogStep(log, 'Cleaned up temporary file');
         } catch (e) {
           addLogStep(log, 'Warning: Could not clean up temp file', undefined, String(e));

@@ -12,7 +12,7 @@ import matter from 'gray-matter';
 import { registerTask, unregisterTask, enableTask, disableTask, getTaskStatus } from './scheduler.js';
 import { executeTask } from './executor.js';
 import { verifyLogFile } from './logger.js';
-import { loadConfig } from './config.js';
+import { loadConfig, getConfigDir } from './config.js';
 import { execSync } from 'child_process';
 
 const program = new Command();
@@ -302,7 +302,6 @@ program
   .action(() => {
     const config = loadConfig();
     const taskCount = getTaskFiles().length;
-    const { getConfigDir } = require('./config.js');
 
     console.log('Cron-Claude System Status\n');
     console.log(`Version: 0.1.0`);
