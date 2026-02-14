@@ -7,14 +7,10 @@ import { randomBytes } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { Config } from './types.js';
 
 const CONFIG_DIR = join(homedir(), '.cron-claude');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
-
-interface Config {
-  secretKey: string;
-  version: string;
-}
 
 /**
  * Ensure config directory exists
@@ -40,17 +36,29 @@ export function loadConfig(): Config {
 
   if (existsSync(CONFIG_FILE)) {
     const data = readFileSync(CONFIG_FILE, 'utf-8');
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+
+    // Merge with defaults for backward compatibility
+    return {
+      secretKey: parsed.secretKey,
+      version: parsed.version || '0.1.0',
+      storageType: parsed.storageType || 'auto',
+      tasksDir: parsed.tasksDir || join(process.cwd(), 'tasks'),
+      storagePreferenceSet: parsed.storagePreferenceSet || false,
+    };
   }
 
   // Create new config with generated secret key
   const config: Config = {
     secretKey: generateSecretKey(),
     version: '0.1.0',
+    storageType: 'auto',
+    tasksDir: join(process.cwd(), 'tasks'),
+    storagePreferenceSet: false,
   };
 
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
-  console.log('Generated new secret key for log signing');
+  console.error('Generated new secret key for log signing');
 
   return config;
 }
@@ -68,4 +76,13 @@ export function getSecretKey(): string {
  */
 export function getConfigDir(): string {
   return CONFIG_DIR;
+}
+
+/**
+ * Update configuration with partial updates
+ */
+export function updateConfig(updates: Partial<Config>): void {
+  const config = loadConfig();
+  const updated = { ...config, ...updates };
+  writeFileSync(CONFIG_FILE, JSON.stringify(updated, null, 2), 'utf-8');
 }

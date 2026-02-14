@@ -11,47 +11,46 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import matter from 'gray-matter';
 import { registerTask, unregisterTask, enableTask, disableTask, getTaskStatus } from './scheduler.js';
 import { executeTask } from './executor.js';
 import { verifyLogFile } from './logger.js';
-import { loadConfig, getConfigDir } from './config.js';
+import { loadConfig, getConfigDir, updateConfig } from './config.js';
 import { execSync } from 'child_process';
+import { TaskStorage } from './storage/interface.js';
+import { createStorage } from './storage/factory.js';
+import { TaskDefinition } from './types.js';
 
 // Get project root (ESM equivalent of __dirname)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, '..');
-const TASKS_DIR = join(PROJECT_ROOT, 'tasks');
 
 // Read version from package.json
 const packageJson = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
 const VERSION = packageJson.version;
 
-// Ensure tasks directory exists
-if (!existsSync(TASKS_DIR)) {
-  mkdirSync(TASKS_DIR, { recursive: true });
-}
+// Storage instance (initialized in initializeStorage)
+let storage: TaskStorage;
 
 /**
- * Helper functions
+ * Initialize storage backend
  */
-function getTaskFiles(): string[] {
-  try {
-    return readdirSync(TASKS_DIR).filter((f) => f.endsWith('.md'));
-  } catch {
-    return [];
-  }
-}
+async function initializeStorage(): Promise<void> {
+  const config = loadConfig();
 
-function parseTask(filename: string): any {
-  const filePath = join(TASKS_DIR, filename);
-  const content = readFileSync(filePath, 'utf-8');
-  const parsed = matter(content);
-  return { filePath, ...parsed.data, instructions: parsed.content };
+  try {
+    storage = await createStorage(config, updateConfig);
+    console.error(`Storage initialized: ${storage.constructor.name}`);
+  } catch (error) {
+    console.error(`Storage initialization failed: ${error}`);
+    // Fallback to file storage on error
+    const { FileStorage } = await import('./storage/file-storage.js');
+    storage = new FileStorage(config.tasksDir || join(PROJECT_ROOT, 'tasks'));
+    console.error('Fell back to file storage');
+  }
 }
 
 /**
@@ -255,28 +254,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
+  // Ensure storage is initialized
+  if (!storage) {
+    await initializeStorage();
+  }
+
   try {
     switch (name) {
       case 'cron_create_task': {
         const { task_id, schedule, invocation, instructions, toast_notifications, enabled } =
           args as any;
 
-        const template = `---
-id: ${task_id}
-schedule: "${schedule || '0 9 * * *'}"
-invocation: ${invocation || 'cli'}
-notifications:
-  toast: ${toast_notifications !== false}
-enabled: ${enabled !== false}
----
+        const taskDef: TaskDefinition = {
+          id: task_id,
+          schedule: schedule || '0 9 * * *',
+          invocation: invocation || 'cli',
+          notifications: { toast: toast_notifications !== false },
+          enabled: enabled !== false,
+          instructions,
+        };
 
-${instructions}
-`;
-
-        const filename = `${task_id}.md`;
-        const filePath = join(TASKS_DIR, filename);
-
-        if (existsSync(filePath)) {
+        if (await storage.exists(task_id)) {
           return {
             content: [
               {
@@ -287,7 +285,9 @@ ${instructions}
           };
         }
 
-        writeFileSync(filePath, template, 'utf-8');
+        await storage.createTask(taskDef);
+
+        const filePath = storage.getTaskFilePath(task_id);
 
         return {
           content: [
@@ -301,23 +301,21 @@ ${instructions}
 
       case 'cron_register_task': {
         const { task_id } = args as any;
-        const filename = `${task_id}.md`;
-        const filePath = join(TASKS_DIR, filename);
 
-        if (!existsSync(filePath)) {
+        if (!(await storage.exists(task_id))) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Error: Task file not found: ${filename}`,
+                text: `Error: Task not found: ${task_id}`,
               },
             ],
           };
         }
 
-        const task = parseTask(filename);
+        const task = await storage.getTask(task_id);
 
-        if (!task.schedule) {
+        if (!task || !task.schedule) {
           return {
             content: [
               {
@@ -328,6 +326,7 @@ ${instructions}
           };
         }
 
+        const filePath = storage.getTaskFilePath(task_id);
         registerTask(task_id, filePath, task.schedule, PROJECT_ROOT);
 
         return {
@@ -355,9 +354,9 @@ ${instructions}
       }
 
       case 'cron_list_tasks': {
-        const files = getTaskFiles();
+        const tasks = await storage.listTasks();
 
-        if (files.length === 0) {
+        if (tasks.length === 0) {
           return {
             content: [
               {
@@ -370,9 +369,8 @@ ${instructions}
 
         let output = 'Scheduled Tasks:\n\n';
 
-        for (const file of files) {
+        for (const task of tasks) {
           try {
-            const task = parseTask(file);
             const status = getTaskStatus(task.id);
 
             output += `📋 ${task.id}\n`;
@@ -395,7 +393,7 @@ ${instructions}
 
             output += '\n';
           } catch (error) {
-            output += `Error parsing ${file}: ${error}\n\n`;
+            output += `Error processing task ${task.id}: ${error}\n\n`;
           }
         }
 
@@ -439,19 +437,20 @@ ${instructions}
 
       case 'cron_run_task': {
         const { task_id } = args as any;
-        const filename = `${task_id}.md`;
-        const filePath = join(TASKS_DIR, filename);
 
-        if (!existsSync(filePath)) {
+        const task = await storage.getTask(task_id);
+        if (!task) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Error: Task file not found: ${filename}`,
+                text: `Error: Task not found: ${task_id}`,
               },
             ],
           };
         }
+
+        const filePath = storage.getTaskFilePath(task_id);
 
         // Execute task
         await executeTask(filePath);
@@ -528,13 +527,16 @@ ${instructions}
 
       case 'cron_status': {
         const config = loadConfig();
-        const taskCount = getTaskFiles().length;
+        const tasks = await storage.listTasks();
+        const taskCount = tasks.length;
+        const storageType = storage.constructor.name.replace('Storage', '').toLowerCase();
 
         const output = `Cron-Claude System Status
 
 Version: ${VERSION}
 Config directory: ${getConfigDir()}
-Tasks directory: ${TASKS_DIR}
+Tasks directory: ${config.tasksDir || 'N/A'}
+Storage type: ${storageType}
 Total tasks: ${taskCount}
 Secret key: ${config.secretKey ? '✓ Configured' : '✗ Not configured'}
 
@@ -563,23 +565,33 @@ Available tools:
 
       case 'cron_get_task': {
         const { task_id } = args as any;
-        const filename = `${task_id}.md`;
-        const filePath = join(TASKS_DIR, filename);
 
-        if (!existsSync(filePath)) {
+        const task = await storage.getTask(task_id);
+
+        if (!task) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Error: Task file not found: ${filename}`,
+                text: `Error: Task not found: ${task_id}`,
               },
             ],
           };
         }
 
-        const content = readFileSync(filePath, 'utf-8');
-        const task = parseTask(filename);
         const status = getTaskStatus(task_id);
+
+        // Reconstruct full definition as markdown
+        const fullDefinition = `---
+id: ${task.id}
+schedule: "${task.schedule}"
+invocation: ${task.invocation}
+notifications:
+  toast: ${task.notifications.toast}
+enabled: ${task.enabled}
+---
+
+${task.instructions}`;
 
         let output = `Task: ${task_id}\n\n`;
         output += `Schedule: ${task.schedule}\n`;
@@ -587,7 +599,7 @@ Available tools:
         output += `Enabled: ${task.enabled}\n`;
         output += `Notifications: ${task.notifications?.toast ? 'Yes' : 'No'}\n`;
         output += `Registered: ${status.exists ? 'Yes' : 'No'}\n\n`;
-        output += `Full Definition:\n\n${content}`;
+        output += `Full Definition:\n\n${fullDefinition}`;
 
         return {
           content: [
@@ -627,6 +639,9 @@ Available tools:
  * Start the server
  */
 async function main() {
+  // Initialize storage before starting server
+  await initializeStorage();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

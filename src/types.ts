@@ -39,3 +39,11 @@ export interface ExecutionResult {
   error?: string;
   steps: LogStep[];
 }
+
+export interface Config {
+  secretKey: string;
+  version: string;
+  storageType?: 'file' | 'memory' | 'auto';
+  tasksDir?: string;
+  storagePreferenceSet?: boolean;
+}
