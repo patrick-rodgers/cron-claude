@@ -27,6 +27,10 @@ const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, '..');
 const TASKS_DIR = join(PROJECT_ROOT, 'tasks');
 
+// Read version from package.json
+const packageJson = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
+const VERSION = packageJson.version;
+
 // Ensure tasks directory exists
 if (!existsSync(TASKS_DIR)) {
   mkdirSync(TASKS_DIR, { recursive: true });
@@ -229,7 +233,7 @@ const tools: Tool[] = [
 const server = new Server(
   {
     name: 'cron-claude',
-    version: '0.1.0',
+    version: VERSION,
   },
   {
     capabilities: {
@@ -528,7 +532,7 @@ ${instructions}
 
         const output = `Cron-Claude System Status
 
-Version: 0.1.0
+Version: ${VERSION}
 Config directory: ${getConfigDir()}
 Tasks directory: ${TASKS_DIR}
 Total tasks: ${taskCount}
