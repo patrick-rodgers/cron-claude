@@ -1,0 +1,70 @@
+{
+  "name": "@patrick-rodgers/cron-claude",
+  "version": "0.1.0",
+  "description": "Scheduled Claude task execution - MCP server for automating recurring tasks via cron schedules",
+  "type": "module",
+  "main": "dist/mcp-server.js",
+  "bin": {
+    "cron-claude": "dist/mcp-server.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".claude-plugin",
+    ".mcp.json",
+    "CLAUDE.md",
+    "commands",
+    "hooks",
+    "skills",
+    "tasks"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp-server.js",
+    "dev": "tsc --watch",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm run validate",
+    "validate": "node scripts/validate.js",
+    "test": "npx @modelcontextprotocol/inspector node dist/mcp-server.js",
+    "preversion": "npm run build",
+    "postversion": "git push && git push --tags"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-plugin",
+    "automation",
+    "cron",
+    "scheduler",
+    "mcp",
+    "model-context-protocol",
+    "windows",
+    "task-scheduler"
+  ],
+  "author": "Patrick Rodgers",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patrick-rodgers/cron-claude.git"
+  },
+  "homepage": "https://github.com/patrick-rodgers/cron-claude#readme",
+  "bugs": {
+    "url": "https://github.com/patrick-rodgers/cron-claude/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "gray-matter": "^4.0.3",
+    "node-cron": "^3.0.3",
+    "node-notifier": "^10.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/node-notifier": "^8.0.5",
+    "typescript": "^5.3.3"
+  }
+}

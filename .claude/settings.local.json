@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(pwsh:*)",
+      "Bash(npx:*)",
+      "Bash(chmod:*)",
+      "Bash(npm link:*)",
+      "Bash(timeout 3 node:*)",
+      "Bash(node:*)",
+      "Bash(npm pack:*)",
+      "Bash(cron-claude)",
+      "Bash(ls:*)",
+      "Bash(claude plugin add:*)",
+      "Bash(npm run validate:*)",
+      "Bash(npm view:*)"
+    ]
+  }
+}
