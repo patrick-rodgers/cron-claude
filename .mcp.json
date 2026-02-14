@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cron-claude": {
+      "command": "cmd",
+      "args": ["/c", "npx", "@patrick-rodgers/cron-claude"]
+    }
+  }
+}

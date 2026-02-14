@@ -1,0 +1,27 @@
+{
+  "name": "cron-claude",
+  "version": "0.1.0",
+  "description": "Scheduled Claude task execution - MCP server for automating recurring tasks via cron schedules",
+  "author": {
+    "name": "Patrick Rodgers"
+  },
+  "repository": "https://github.com/patrick-rodgers/cron-claude",
+  "license": "MIT",
+  "permissions": {
+    "mcp": {
+      "cron-claude": [
+        "cron_create_task",
+        "cron_register_task",
+        "cron_unregister_task",
+        "cron_list_tasks",
+        "cron_enable_task",
+        "cron_disable_task",
+        "cron_run_task",
+        "cron_view_logs",
+        "cron_verify_log",
+        "cron_status",
+        "cron_get_task"
+      ]
+    }
+  }
+}

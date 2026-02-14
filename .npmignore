@@ -1,0 +1,23 @@
+# Source files (we publish dist/ instead)
+src/
+tsconfig.json
+*.tsbuildinfo
+
+# Development files
+.claude/
+node_modules/
+.git/
+.github/
+.gitignore
+.vscode/
+
+# Build artifacts
+*.log
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep tasks/ as examples for users
