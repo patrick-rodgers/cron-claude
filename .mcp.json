@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "cron-claude": {
-      "command": "cmd",
-      "args": ["/c", "npx", "@patrick-rodgers/cron-claude"]
+      "command": "node",
+      "args": ["D:\\github\\cron-claude\\dist\\mcp-server.js"]
     }
   }
 }
