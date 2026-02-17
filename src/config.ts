@@ -34,17 +34,19 @@ function generateSecretKey(): string {
 export function loadConfig(): Config {
   ensureConfigDir();
 
+  const defaultTasksDir = join(CONFIG_DIR, 'tasks');
+  const defaultLogsDir = join(CONFIG_DIR, 'logs');
+
   if (existsSync(CONFIG_FILE)) {
     const data = readFileSync(CONFIG_FILE, 'utf-8');
     const parsed = JSON.parse(data);
 
     // Merge with defaults for backward compatibility
     return {
-      secretKey: parsed.secretKey,
+      secretKey: parsed.secretKey || generateSecretKey(),
       version: parsed.version || '0.1.0',
-      storageType: parsed.storageType || 'auto',
-      tasksDir: parsed.tasksDir || join(process.cwd(), 'tasks'),
-      storagePreferenceSet: parsed.storagePreferenceSet || false,
+      tasksDir: parsed.tasksDir || defaultTasksDir,
+      logsDir: parsed.logsDir || defaultLogsDir,
     };
   }
 
@@ -52,13 +54,12 @@ export function loadConfig(): Config {
   const config: Config = {
     secretKey: generateSecretKey(),
     version: '0.1.0',
-    storageType: 'auto',
-    tasksDir: join(process.cwd(), 'tasks'),
-    storagePreferenceSet: false,
+    tasksDir: defaultTasksDir,
+    logsDir: defaultLogsDir,
   };
 
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
-  console.error('Generated new secret key for log signing');
+  console.error('Generated new configuration with secret key for log signing');
 
   return config;
 }

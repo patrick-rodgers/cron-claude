@@ -34,7 +34,8 @@ export function parseTaskDefinition(filePath: string): TaskDefinition {
  */
 async function executeViaCLI(
   task: TaskDefinition,
-  log: TaskLog
+  log: TaskLog,
+  claudeCodePath?: string
 ): Promise<ExecutionResult> {
   addLogStep(log, 'Starting CLI execution');
 
@@ -46,10 +47,12 @@ async function executeViaCLI(
 
       addLogStep(log, 'Created temporary task file', tempFile);
 
-      // Spawn claude-code process
-      addLogStep(log, 'Spawning claude-code process');
+      // Spawn claude/claude-code process
+      // Priority: 1. Passed argument, 2. CLAUDE_CODE_PATH env var, 3. 'claude-code' or 'claude' from PATH
+      const claudeCommand = claudeCodePath || process.env.CLAUDE_CODE_PATH || 'claude-code';
+      addLogStep(log, 'Spawning Claude CLI process', `Using: ${claudeCommand}`);
 
-      const claude = spawn('claude-code', [tempFile], {
+      const claude = spawn(claudeCommand, [tempFile], {
         stdio: 'pipe',
         shell: true,
       });
@@ -187,7 +190,7 @@ async function executeViaAPI(
 /**
  * Execute a task
  */
-export async function executeTask(taskFilePath: string): Promise<void> {
+export async function executeTask(taskFilePath: string, claudeCodePath?: string): Promise<void> {
   // Parse task definition
   const task = parseTaskDefinition(taskFilePath);
 
@@ -206,7 +209,7 @@ export async function executeTask(taskFilePath: string): Promise<void> {
   let result: ExecutionResult;
 
   if (task.invocation === 'cli') {
-    result = await executeViaCLI(task, log);
+    result = await executeViaCLI(task, log, claudeCodePath);
   } else if (task.invocation === 'api') {
     result = await executeViaAPI(task, log);
   } else {
@@ -238,16 +241,17 @@ export async function executeTask(taskFilePath: string): Promise<void> {
  * Called by Windows Task Scheduler
  */
 export async function main() {
-  // Get task file path from command line arguments
+  // Get task file path and optional claude-code path from command line arguments
   const taskFile = process.argv[2];
+  const claudeCodePath = process.argv[3]; // Optional: full path to claude-code executable
 
   if (!taskFile) {
-    console.error('Usage: node executor.js <task-file-path>');
+    console.error('Usage: node executor.js <task-file-path> [claude-code-path]');
     process.exit(1);
   }
 
   try {
-    await executeTask(taskFile);
+    await executeTask(taskFile, claudeCodePath);
     process.exit(0);
   } catch (error) {
     console.error('Fatal error:', error);

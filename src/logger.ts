@@ -1,14 +1,14 @@
 /**
  * Audit logger with HMAC-SHA256 signing
- * Logs all task executions to odsp-memory skill with cryptographic signatures
+ * Logs all task executions to local log directory with cryptographic signatures
  */
 
 import { createHmac } from 'crypto';
-import { execSync } from 'child_process';
-import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync } from 'fs';
 import matter from 'gray-matter';
+import { join } from 'path';
 import { TaskLog, LogStep } from './types.js';
-import { getSecretKey } from './config.js';
+import { getSecretKey, loadConfig } from './config.js';
 
 /**
  * Create HMAC-SHA256 signature for content
@@ -76,39 +76,23 @@ Status: ${log.status}
 }
 
 /**
- * Save log to memory skill
+ * Save log to local log directory
  */
-export function saveLogToMemory(log: TaskLog): void {
+export function saveLog(log: TaskLog): void {
+  const config = loadConfig();
   const markdown = formatTaskLog(log);
-  const tempFile = `${process.env.TEMP || '/tmp'}/cron-claude-log-${log.executionId}.md`;
 
-  // Write to temp file
-  writeFileSync(tempFile, markdown, 'utf-8');
+  // Ensure logs directory exists
+  mkdirSync(config.logsDir, { recursive: true });
 
-  try {
-    // Store in memory skill
-    const category = 'cron-task';
-    const content = `Task ${log.taskId} execution ${log.executionId}: ${log.status}`;
+  // Create log filename with timestamp for easy sorting
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `${log.taskId}_${timestamp}_${log.executionId}.md`;
+  const logPath = join(config.logsDir, filename);
 
-    execSync(`odsp-memory remember ${category} "${content}"`, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-    });
-
-    console.log(`✓ Logged execution ${log.executionId} to memory skill`);
-  } catch (error) {
-    console.error('Failed to save log to memory skill:', error);
-    // Fallback: save to local file
-    const fallbackPath = `./logs/${log.taskId}-${log.executionId}.md`;
-    mkdirSync('./logs', { recursive: true });
-    writeFileSync(fallbackPath, markdown, 'utf-8');
-    console.log(`✓ Saved log to fallback location: ${fallbackPath}`);
-  } finally {
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch {}
-  }
+  // Write log file
+  writeFileSync(logPath, markdown, 'utf-8');
+  console.log(`✓ Logged execution ${log.executionId} to ${logPath}`);
 }
 
 /**
@@ -183,5 +167,5 @@ export function addLogStep(log: TaskLog, action: string, output?: string, error?
  */
 export function finalizeLog(log: TaskLog, success: boolean): void {
   log.status = success ? 'success' : 'failure';
-  saveLogToMemory(log);
+  saveLog(log);
 }

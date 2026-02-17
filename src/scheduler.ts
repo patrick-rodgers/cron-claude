@@ -4,8 +4,40 @@
  */
 
 import { execSync } from 'child_process';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
+import { writeFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
 import cron from 'node-cron';
+
+/**
+ * Detect the path to claude/claude-code executable
+ */
+function detectClaudeCodePath(): string | null {
+  try {
+    // Try multiple command names: claude-code first, then claude
+    const commands = process.platform === 'win32'
+      ? ['where claude-code', 'where claude']
+      : ['which claude-code', 'which claude'];
+
+    for (const command of commands) {
+      try {
+        const result = execSync(command, { encoding: 'utf-8', stdio: 'pipe' }).trim();
+        // On Windows, 'where' can return multiple paths - take the first one
+        const paths = result.split('\n');
+        const path = paths[0].trim();
+        if (path) {
+          return path;
+        }
+      } catch {
+        // Try next command
+        continue;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 interface ScheduleTrigger {
   type: 'daily' | 'weekly' | 'monthly' | 'once' | 'startup';
@@ -155,15 +187,85 @@ export function registerTask(
     const trigger = parseCronExpression(cronExpr);
     console.log(`Trigger type: ${trigger.type}, time: ${trigger.time}`);
 
-    const psCommand = generateTaskSchedulerCommand(taskId, taskFilePath, trigger, projectRoot);
+    const executorPath = resolve(projectRoot, 'dist', 'executor.js');
+    const absoluteTaskPath = resolve(taskFilePath);
 
-    // Execute PowerShell command
-    execSync(psCommand, {
-      shell: 'powershell.exe',
-      stdio: 'inherit',
-    });
+    // Detect claude-code path and pass it directly to executor
+    const claudeCodePath = detectClaudeCodePath();
 
-    console.log(`✓ Task "${taskId}" registered successfully`);
+    if (claudeCodePath) {
+      console.log(`Detected claude-code at: ${claudeCodePath}`);
+    } else {
+      console.log('Warning: claude-code not found in PATH - CLI tasks may fail');
+    }
+
+    // Build arguments: executor.js taskPath [claudeCodePath]
+    const executorArgs = claudeCodePath
+      ? `"${executorPath}" "${absoluteTaskPath}" "${claudeCodePath}"`
+      : `"${executorPath}" "${absoluteTaskPath}"`;
+
+    // Build PowerShell registration script
+    const psScript = `
+$ErrorActionPreference = 'Stop'
+$action = New-ScheduledTaskAction -Execute "node" -Argument '${executorArgs}'
+$trigger = New-ScheduledTaskTrigger -Daily -At "${trigger.time || '00:00'}"
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U
+Register-ScheduledTask -TaskName "CronClaude_${taskId}" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
+Write-Host "Task registered successfully"
+`.trim();
+
+    // Try normal registration first
+    try {
+      const psCommand = `powershell.exe -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`;
+      execSync(psCommand, {
+        stdio: 'pipe',
+        encoding: 'utf-8',
+      });
+      console.log(`✓ Task "${taskId}" registered successfully`);
+      return;
+    } catch (normalError: any) {
+      // Check if it's an access denied error (check both message and stderr)
+      const errorText = (normalError.message || '') + (normalError.stderr || '');
+      const isAccessDenied =
+        errorText.includes('Access is denied') ||
+        errorText.includes('0x80070005') ||
+        errorText.includes('PermissionDenied');
+
+      if (isAccessDenied) {
+        console.log('Administrator privileges required. Requesting elevation...');
+
+        // Write script to temporary file
+        const tempScript = join(tmpdir(), `cron-claude-register-${taskId}-${Date.now()}.ps1`);
+        writeFileSync(tempScript, psScript, 'utf-8');
+
+        try {
+          // Execute with elevation
+          const elevatedCommand = `powershell.exe -Command "Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '${tempScript}' -Verb RunAs -Wait"`;
+
+          execSync(elevatedCommand, {
+            stdio: 'inherit',
+          });
+
+          // Verify the task was created
+          const verifyCommand = `powershell.exe -Command "Get-ScheduledTask -TaskName 'CronClaude_${taskId}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty TaskName"`;
+          const result = execSync(verifyCommand, { encoding: 'utf-8' }).trim();
+
+          if (result === `CronClaude_${taskId}`) {
+            console.log(`✓ Task "${taskId}" registered successfully with elevated privileges`);
+          } else {
+            throw new Error('Task registration was cancelled or failed');
+          }
+        } finally {
+          // Clean up temp file
+          try {
+            unlinkSync(tempScript);
+          } catch {}
+        }
+      } else {
+        throw normalError;
+      }
+    }
   } catch (error) {
     console.error(`Failed to register task "${taskId}":`, error);
     throw error;

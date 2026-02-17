@@ -28,10 +28,12 @@ npm run prepack      # Build before publishing
 
 **TypeScript ESM project** with NodeNext module resolution. Source in `src/`, compiles to `dist/`.
 
+**Simple, file-based architecture** - no external dependencies for storage.
+
 ### MCP Server Entry Point
 
 - **`src/mcp-server.ts`** → **`dist/mcp-server.js`** - Primary entry point
-- Registered as `cron-claude-mcp` binary in package.json
+- Registered as `cron-claude` binary in package.json
 - Uses `@modelcontextprotocol/sdk` with stdio transport
 - Exposes 11 tools for task management
 - Never uses `console.log()` (stdio protocol constraint), only `console.error()` for logging
@@ -44,7 +46,13 @@ npm run prepack      # Build before publishing
   - Server initialization and transport setup
   - Tool registration (11 tools)
   - Request handlers for all cron operations
-  - Task file management
+  - Direct file-based task management
+
+- **`tasks.ts`** - Task management functions
+  - Simple file operations for task CRUD
+  - Read/write task definitions as markdown files
+  - List and search tasks
+  - No abstraction layer - direct filesystem access
 
 - **`scheduler.ts`** - Windows Task Scheduler integration
   - Register/unregister tasks with Task Scheduler
@@ -60,9 +68,9 @@ npm run prepack      # Build before publishing
 
 - **`logger.ts`** - Audit logging with cryptographic signatures
   - HMAC-SHA256 signing of all log entries
-  - Stores logs via memory integration (odsp-memory)
-  - Fallback to local `./logs/` directory
+  - Stores logs as markdown files in configured directory
   - Log verification functionality
+  - Critical audit trail for all executions
 
 - **`notifier.ts`** - Windows toast notifications
   - Shows completion notifications
@@ -72,18 +80,32 @@ npm run prepack      # Build before publishing
 - **`config.ts`** - Configuration management
   - Loads/saves config from `~/.cron-claude/config.json`
   - Manages secret key for HMAC signing
+  - Configurable task and log directories
   - Auto-generates key on first use
 
 - **`types.ts`** - Shared TypeScript types
-  - `TaskDefinition`, `TaskMetadata`, `ExecutionLog`
-  - `Config`, `NotificationOptions`
+  - `TaskDefinition`, `TaskLog`, `LogStep`
+  - `Config`, `ExecutionResult`
 
 ### Data Flow
 
-1. **Task Storage**: `tasks/*.md` - Markdown files with YAML frontmatter
+1. **Task Storage**: `~/.cron-claude/tasks/*.md` - Markdown files with YAML frontmatter
 2. **Execution**: Task Scheduler → PowerShell → Node.js → `executeTask()`
-3. **Logging**: Execution results → Logger → Memory integration or local files
+3. **Logging**: Execution results → Logger → `~/.cron-claude/logs/*.md` with HMAC signatures
 4. **Notifications**: Completion → Notifier → Windows Toast
+
+### File Structure
+
+```
+~/.cron-claude/
+├── config.json              # Configuration (secret key, directories)
+├── tasks/                   # Task definitions
+│   ├── morning-greeting.md
+│   └── daily-summary.md
+└── logs/                    # Execution logs (HMAC signed)
+    ├── morning-greeting_2024-02-17T09-00-00_exec-123.md
+    └── daily-summary_2024-02-17T18-00-00_exec-456.md
+```
 
 ### Task Definition Format
 
@@ -177,33 +199,48 @@ This helps users discover cron functionality in new sessions.
 
 ## Audit Logging & Security
 
+**Critical Feature**: All task executions are logged with cryptographic signatures for tamper-proof audit trails.
+
+**Log Storage**: `~/.cron-claude/logs/`
+- Filename format: `{taskId}_{timestamp}_{executionId}.md`
+- Sorted chronologically for easy review
+- HMAC-SHA256 signatures prevent tampering
+
 **Log Structure:**
 ```markdown
 ---
+category: cron-task
 taskId: task-id
-executionId: uuid
-timestamp: 2024-02-14T10:30:00Z
+executionId: exec-123
+timestamp: 2024-02-17T10:30:00Z
 status: success|failure
 signature: hmac-sha256-hex
 ---
 
-# Execution Log
+# Task Execution Log: task-id
 
-Log content...
+**Execution ID:** exec-123
+**Status:** success
+**Started:** 2024-02-17T10:30:00Z
+
+## Execution Steps
+...
 ```
 
 **Signature Verification:**
 - Uses secret key from `~/.cron-claude/config.json`
 - HMAC-SHA256 of log content (excluding signature field)
 - Verifiable with `cron_verify_log` tool
+- Ensures logs haven't been modified
 
 ## Conventions
 
 - All imports use `.js` extensions (ESM requirement with NodeNext)
 - MCP server logs to stderr only (stdio protocol requirement)
-- Tasks stored as `tasks/<task-id>.md`
-- Windows Task Scheduler names: `CronClaude_<task-id>`
-- Logs stored via odsp-memory with category `cron-task`
+- Tasks stored as `~/.cron-claude/tasks/<task-id>.md`
+- Logs stored as `~/.cron-claude/logs/<task-id>_<timestamp>_<exec-id>.md`
+- Windows Task Scheduler task names: `CronClaude_<task-id>`
+- All task and log paths are configurable via `~/.cron-claude/config.json`
 
 ## Testing
 
@@ -230,11 +267,20 @@ npx @modelcontextprotocol/inspector node dist/mcp-server.js
 
 ```json
 {
-  "secretKey": "base64-encoded-key"
+  "secretKey": "hex-encoded-hmac-key",
+  "version": "0.1.0",
+  "tasksDir": "C:\\Users\\username\\.cron-claude\\tasks",
+  "logsDir": "C:\\Users\\username\\.cron-claude\\logs"
 }
 ```
 
-Generated automatically on first use.
+**Configuration Options:**
+- `secretKey` - HMAC-SHA256 key for log signing (auto-generated)
+- `version` - Config version for future migrations
+- `tasksDir` - Where to store task definition files (default: `~/.cron-claude/tasks`)
+- `logsDir` - Where to store execution logs (default: `~/.cron-claude/logs`)
+
+**Note**: Users can customize directories to use OneDrive, Dropbox, or any other location for backup/sync.
 
 ## Windows Task Scheduler Integration
 

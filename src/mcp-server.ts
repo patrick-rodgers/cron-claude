@@ -11,17 +11,22 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import matter from 'gray-matter';
 import { registerTask, unregisterTask, enableTask, disableTask, getTaskStatus } from './scheduler.js';
 import { executeTask } from './executor.js';
 import { verifyLogFile } from './logger.js';
-import { loadConfig, getConfigDir, updateConfig } from './config.js';
-import { execSync } from 'child_process';
-import { TaskStorage } from './storage/interface.js';
-import { createStorage } from './storage/factory.js';
+import { loadConfig, getConfigDir } from './config.js';
 import { TaskDefinition } from './types.js';
+import {
+  createTask,
+  getTask,
+  listTasks,
+  taskExists,
+  getTaskFilePath,
+} from './tasks.js';
 
 // Get project root (ESM equivalent of __dirname)
 const __filename = fileURLToPath(import.meta.url);
@@ -31,27 +36,6 @@ const PROJECT_ROOT = resolve(__dirname, '..');
 // Read version from package.json
 const packageJson = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
 const VERSION = packageJson.version;
-
-// Storage instance (initialized in initializeStorage)
-let storage: TaskStorage;
-
-/**
- * Initialize storage backend
- */
-async function initializeStorage(): Promise<void> {
-  const config = loadConfig();
-
-  try {
-    storage = await createStorage(config, updateConfig);
-    console.error(`Storage initialized: ${storage.constructor.name}`);
-  } catch (error) {
-    console.error(`Storage initialization failed: ${error}`);
-    // Fallback to file storage on error
-    const { FileStorage } = await import('./storage/file-storage.js');
-    storage = new FileStorage(config.tasksDir || join(PROJECT_ROOT, 'tasks'));
-    console.error('Fell back to file storage');
-  }
-}
 
 /**
  * Define MCP tools
@@ -254,11 +238,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  // Ensure storage is initialized
-  if (!storage) {
-    await initializeStorage();
-  }
-
   try {
     switch (name) {
       case 'cron_create_task': {
@@ -274,7 +253,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           instructions,
         };
 
-        if (await storage.exists(task_id)) {
+        if (taskExists(task_id)) {
           return {
             content: [
               {
@@ -285,9 +264,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        await storage.createTask(taskDef);
+        createTask(taskDef);
 
-        const filePath = storage.getTaskFilePath(task_id);
+        const filePath = getTaskFilePath(task_id);
 
         return {
           content: [
@@ -302,7 +281,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'cron_register_task': {
         const { task_id } = args as any;
 
-        if (!(await storage.exists(task_id))) {
+        if (!taskExists(task_id)) {
           return {
             content: [
               {
@@ -313,7 +292,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const task = await storage.getTask(task_id);
+        const task = getTask(task_id);
 
         if (!task || !task.schedule) {
           return {
@@ -326,7 +305,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const filePath = storage.getTaskFilePath(task_id);
+        const filePath = getTaskFilePath(task_id);
         registerTask(task_id, filePath, task.schedule, PROJECT_ROOT);
 
         return {
@@ -354,7 +333,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'cron_list_tasks': {
-        const tasks = await storage.listTasks();
+        const tasks = listTasks();
 
         if (tasks.length === 0) {
           return {
@@ -438,7 +417,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'cron_run_task': {
         const { task_id } = args as any;
 
-        const task = await storage.getTask(task_id);
+        const task = getTask(task_id);
         if (!task) {
           return {
             content: [
@@ -450,7 +429,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const filePath = storage.getTaskFilePath(task_id);
+        const filePath = getTaskFilePath(task_id);
 
         // Execute task
         await executeTask(filePath);
@@ -469,15 +448,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { task_id } = args as any;
 
         try {
-          const result = execSync(`odsp-memory recall --category=cron-task "${task_id}"`, {
-            encoding: 'utf-8',
-          });
+          const config = loadConfig();
+          const logFiles = readdirSync(config.logsDir)
+            .filter((f) => f.startsWith(`${task_id}_`) && f.endsWith('.md'))
+            .sort()
+            .reverse(); // Most recent first
+
+          if (logFiles.length === 0) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `No logs found for task: ${task_id}`,
+                },
+              ],
+            };
+          }
+
+          // Return list of log files with timestamps
+          let output = `Execution logs for task: ${task_id}\n\n`;
+          output += `Total executions: ${logFiles.length}\n\n`;
+          output += `Recent logs:\n`;
+
+          for (const file of logFiles.slice(0, 10)) {
+            // Show last 10
+            const filePath = join(config.logsDir, file);
+            const content = readFileSync(filePath, 'utf-8');
+            const parsed = matter(content);
+            output += `\n📄 ${file}\n`;
+            output += `   Status: ${parsed.data.status || 'unknown'}\n`;
+            output += `   Time: ${parsed.data.timestamp || 'unknown'}\n`;
+          }
+
+          output += `\n\nLog directory: ${config.logsDir}`;
 
           return {
             content: [
               {
                 type: 'text',
-                text: result || `No logs found for task: ${task_id}`,
+                text: output,
               },
             ],
           };
@@ -527,16 +536,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'cron_status': {
         const config = loadConfig();
-        const tasks = await storage.listTasks();
+        const tasks = listTasks();
         const taskCount = tasks.length;
-        const storageType = storage.constructor.name.replace('Storage', '').toLowerCase();
 
         const output = `Cron-Claude System Status
 
 Version: ${VERSION}
 Config directory: ${getConfigDir()}
-Tasks directory: ${config.tasksDir || 'N/A'}
-Storage type: ${storageType}
+Tasks directory: ${config.tasksDir}
+Logs directory: ${config.logsDir}
 Total tasks: ${taskCount}
 Secret key: ${config.secretKey ? '✓ Configured' : '✗ Not configured'}
 
@@ -566,7 +574,7 @@ Available tools:
       case 'cron_get_task': {
         const { task_id } = args as any;
 
-        const task = await storage.getTask(task_id);
+        const task = getTask(task_id);
 
         if (!task) {
           return {
@@ -639,9 +647,6 @@ ${task.instructions}`;
  * Start the server
  */
 async function main() {
-  // Initialize storage before starting server
-  await initializeStorage();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

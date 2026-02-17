@@ -53,10 +53,11 @@ Restart Claude Desktop after adding the configuration.
 - 🕐 **Cron Scheduling** - Use familiar cron expressions for flexible scheduling
 - 🛡️ **Windows Task Scheduler** - Reliable, native scheduling that survives reboots
 - 🔐 **Audit Logging** - HMAC-SHA256 signatures for tamper-proof logs
-- 💾 **Memory Integration** - Automatic log storage and retrieval
+- 💾 **Simple File Storage** - Tasks and logs stored as markdown files (easy to backup)
 - 🔔 **Toast Notifications** - Optional Windows notifications on completion
 - 🎯 **Flexible Execution** - Run via Claude CLI or Anthropic API
 - 🔌 **Full MCP Integration** - Works seamlessly in all Claude Code sessions
+- 📁 **Configurable Directories** - Store tasks and logs wherever you want
 
 ## 📚 How It Works
 
@@ -86,19 +87,32 @@ Format as a concise report and save to memory.
 
 ### Storage
 
-Tasks are stored in the `tasks/` directory:
+**Default locations** (configurable via `~/.cron-claude/config.json`):
+
 ```
-tasks/
-  daily-summary.md
-  weekly-backup.md
-  hourly-monitor.md
+~/.cron-claude/
+├── config.json              # Configuration
+├── tasks/                   # Task definitions
+│   ├── daily-summary.md
+│   ├── weekly-backup.md
+│   └── hourly-monitor.md
+└── logs/                    # Execution logs (HMAC signed)
+    ├── daily-summary_2024-02-17T09-00-00_exec-123.md
+    └── weekly-backup_2024-02-17T18-00-00_exec-456.md
 ```
+
+**Why file-based?**
+- ✅ Simple and reliable - no external dependencies
+- ✅ Easy to backup (point directories to OneDrive/Dropbox)
+- ✅ Version control friendly (Git)
+- ✅ Easy to inspect and debug
+- ✅ Works offline
 
 ### Execution Flow
 
 1. **Schedule** → Windows Task Scheduler triggers at scheduled time
 2. **Execute** → Task runs via Claude CLI or Anthropic API
-3. **Log** → Execution results stored with HMAC signature
+3. **Log** → Execution results written to `~/.cron-claude/logs/` with HMAC signature
 4. **Notify** → Optional toast notification on completion
 
 ## 🛠️ Available Tools
@@ -120,7 +134,7 @@ tasks/
 |------|-------------|
 | `cron_run_task` | Execute a task immediately (testing) |
 | `cron_list_tasks` | List all tasks with status |
-| `cron_view_logs` | View execution logs from memory |
+| `cron_view_logs` | View execution logs for a task |
 
 ### Verification & Status (2 tools)
 
@@ -233,7 +247,16 @@ Every task execution is automatically logged with:
 - ✅ Timestamps for each operation
 - ✅ HMAC-SHA256 cryptographic signature
 
-Logs are stored via memory integration for automatic sync and backup.
+**Logs are stored as markdown files** in `~/.cron-claude/logs/` with filenames like:
+```
+{task-id}_{timestamp}_{execution-id}.md
+```
+
+This makes them:
+- Easy to search and review
+- Simple to backup (copy directory to OneDrive/Dropbox)
+- Compatible with version control
+- Verifiable against tampering
 
 ### Log Verification
 
@@ -248,8 +271,26 @@ Claude will check the HMAC signature to ensure authenticity.
 
 On first use, Cron-Claude generates a secret key:
 - Stored in: `~/.cron-claude/config.json`
-- Used for: Signing all log entries
+- Used for: Signing all log entries with HMAC-SHA256
 - Keep secure: Treat like a password
+
+### Configurable Storage
+
+You can configure where tasks and logs are stored:
+
+```json
+{
+  "secretKey": "auto-generated",
+  "tasksDir": "C:\\Users\\you\\OneDrive\\cron-tasks",
+  "logsDir": "C:\\Users\\you\\OneDrive\\cron-logs"
+}
+```
+
+This allows you to:
+- Backup tasks and logs to cloud storage
+- Share task definitions across machines
+- Use version control (Git) for task definitions
+- Organize logs however you prefer
 
 ## 🎨 Claude Code Plugin Features
 
@@ -376,8 +417,10 @@ You can also check Windows Task Scheduler manually:
 
 ### Logs Not Appearing
 
-- Verify memory integration is working
-- Check fallback location: `./logs/` directory
+- Check configured log directory in `~/.cron-claude/config.json`
+- Verify directory has write permissions
+- Check disk space availability
+- Look in default location: `~/.cron-claude/logs/`
 
 ## 🔧 Development
 
@@ -433,7 +476,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 - [Claude Desktop](https://claude.ai/download)
 - [Claude Code CLI](https://github.com/anthropics/claude-code)
-- [OneDrive Memory Plugin](https://github.com/patrick-rodgers/claude-onedrive-memory)
 
 ---
 

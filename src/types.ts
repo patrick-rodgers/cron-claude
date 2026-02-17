@@ -43,7 +43,6 @@ export interface ExecutionResult {
 export interface Config {
   secretKey: string;
   version: string;
-  storageType?: 'file' | 'memory' | 'auto';
-  tasksDir?: string;
-  storagePreferenceSet?: boolean;
+  tasksDir: string;
+  logsDir: string;
 }
