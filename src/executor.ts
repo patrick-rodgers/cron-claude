@@ -5,6 +5,7 @@
 
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { pathToFileURL } from 'url';
 import matter from 'gray-matter';
 import { TaskDefinition, ExecutionResult, TaskLog } from './types.js';
 import { createLog, addLogStep, finalizeLog } from './logger.js';
@@ -52,9 +53,19 @@ async function executeViaCLI(
       const claudeCommand = claudeCodePath || process.env.CLAUDE_CODE_PATH || 'claude-code';
       addLogStep(log, 'Spawning Claude CLI process', `Using: ${claudeCommand}`);
 
-      const claude = spawn(claudeCommand, [tempFile], {
+      // Create environment without CLAUDECODE to allow nested execution
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+
+      const claude = spawn(claudeCommand, [
+        '--print',                        // Non-interactive mode - print response and exit
+        '--dangerously-skip-permissions', // Skip permission prompts for scheduled tasks
+        '--no-session-persistence',       // Don't save session to disk
+        tempFile
+      ], {
         stdio: 'pipe',
         shell: true,
+        env
       });
 
       let output = '';
@@ -260,6 +271,6 @@ export async function main() {
 }
 
 // Run if called directly (ESM equivalent of require.main === module)
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

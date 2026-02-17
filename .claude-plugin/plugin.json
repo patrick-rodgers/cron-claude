@@ -1,6 +1,6 @@
 {
   "name": "cron-claude",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Scheduled Claude task execution - MCP server for automating recurring tasks via cron schedules",
   "author": {
     "name": "Patrick Rodgers"

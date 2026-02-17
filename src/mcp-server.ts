@@ -14,6 +14,7 @@ import {
 import { readFileSync, readdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import matter from 'gray-matter';
 import { registerTask, unregisterTask, enableTask, disableTask, getTaskStatus } from './scheduler.js';
 import { executeTask } from './executor.js';
@@ -431,8 +432,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const filePath = getTaskFilePath(task_id);
 
-        // Execute task
-        await executeTask(filePath);
+        // Detect claude path for CLI tasks
+        let claudePath: string | undefined;
+        if (task.invocation === 'cli') {
+          try {
+            // Try to find claude or claude-code
+            const commands = process.platform === 'win32'
+              ? ['where claude', 'where claude-code']
+              : ['which claude', 'which claude-code'];
+
+            for (const cmd of commands) {
+              try {
+                const result = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' }).trim();
+                if (result) {
+                  claudePath = result.split('\n')[0].trim();
+                  break;
+                }
+              } catch {
+                continue;
+              }
+            }
+          } catch {}
+        }
+
+        // Execute task with claude path if found
+        await executeTask(filePath, claudePath);
 
         return {
           content: [
