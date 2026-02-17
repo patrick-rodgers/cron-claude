@@ -31,14 +31,14 @@ export function parseTaskDefinition(filePath: string): TaskDefinition {
 }
 
 /**
- * Execute task via Claude CLI
+ * Execute task via Claude CLI (visible interactive session)
  */
 async function executeViaCLI(
   task: TaskDefinition,
   log: TaskLog,
   claudeCodePath?: string
 ): Promise<ExecutionResult> {
-  addLogStep(log, 'Starting CLI execution');
+  addLogStep(log, 'Starting interactive Claude session');
 
   return new Promise((resolve) => {
     try {
@@ -48,42 +48,35 @@ async function executeViaCLI(
 
       addLogStep(log, 'Created temporary task file', tempFile);
 
-      // Spawn claude/claude-code process
-      // Priority: 1. Passed argument, 2. CLAUDE_CODE_PATH env var, 3. 'claude-code' or 'claude' from PATH
+      // Spawn Claude in visible interactive mode (no --print flag)
       const claudeCommand = claudeCodePath || process.env.CLAUDE_CODE_PATH || 'claude-code';
-      addLogStep(log, 'Spawning Claude CLI process', `Using: ${claudeCommand}`);
-
-      // Create environment without CLAUDECODE to allow nested execution
-      const env = { ...process.env };
-      delete env.CLAUDECODE;
+      addLogStep(log, 'Launching Claude CLI (visible window)', `Using: ${claudeCommand}`);
 
       const claude = spawn(claudeCommand, [
-        '--print',                        // Non-interactive mode - print response and exit
-        '--dangerously-skip-permissions', // Skip permission prompts for scheduled tasks
-        '--no-session-persistence',       // Don't save session to disk
+        '--print',                         // Exit after completing the task
+        '--dangerously-skip-permissions',  // Skip permission prompts
         tempFile
       ], {
-        stdio: 'pipe',
+        stdio: 'inherit', // Use parent's stdio (makes window visible)
         shell: true,
-        env
+        detached: false
       });
 
-      let output = '';
-      let errorOutput = '';
-
-      claude.stdout?.on('data', (data) => {
-        const text = data.toString();
-        output += text;
-        addLogStep(log, 'CLI output', text);
-      });
-
-      claude.stderr?.on('data', (data) => {
-        const text = data.toString();
-        errorOutput += text;
-        addLogStep(log, 'CLI error output', text);
-      });
+      // Set timeout (5 minutes default)
+      const timeout = setTimeout(() => {
+        addLogStep(log, 'Execution timeout', 'Task exceeded 5 minute limit');
+        claude.kill('SIGTERM');
+        resolve({
+          success: false,
+          output: '',
+          error: 'Execution timeout after 5 minutes',
+          steps: log.steps
+        });
+      }, 5 * 60 * 1000);
 
       claude.on('close', (code) => {
+        clearTimeout(timeout); // Clear the timeout since task completed
+
         // Clean up temp file
         try {
           unlinkSync(tempFile);
@@ -93,28 +86,29 @@ async function executeViaCLI(
         }
 
         if (code === 0) {
-          addLogStep(log, 'CLI execution completed successfully');
+          addLogStep(log, 'Claude session completed successfully', `Exit code: ${code}`);
           resolve({
             success: true,
-            output,
+            output: 'Interactive session completed (see Claude window for details)',
             steps: log.steps,
           });
         } else {
-          addLogStep(log, 'CLI execution failed', undefined, `Exit code: ${code}`);
+          addLogStep(log, 'Claude session exited with error', `Exit code: ${code}`);
           resolve({
             success: false,
-            output,
-            error: errorOutput || `Process exited with code ${code}`,
+            output: '',
+            error: `Claude exited with code ${code}`,
             steps: log.steps,
           });
         }
       });
 
       claude.on('error', (err) => {
-        addLogStep(log, 'CLI execution error', undefined, err.message);
+        clearTimeout(timeout);
+        addLogStep(log, 'Failed to launch Claude', undefined, err.message);
         resolve({
           success: false,
-          output,
+          output: '',
           error: err.message,
           steps: log.steps,
         });

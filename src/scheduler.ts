@@ -10,6 +10,21 @@ import { tmpdir } from 'os';
 import cron from 'node-cron';
 
 /**
+ * Detect the path to node executable
+ */
+function detectNodePath(): string {
+  try {
+    const command = process.platform === 'win32' ? 'where node' : 'which node';
+    const result = execSync(command, { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const paths = result.split('\n');
+    return paths[0].trim();
+  } catch (error) {
+    // Fallback to process.execPath if detection fails
+    return process.execPath;
+  }
+}
+
+/**
  * Detect the path to claude/claude-code executable
  */
 function detectClaudeCodePath(): string | null {
@@ -162,7 +177,7 @@ $taskName = "CronClaude_${taskId}"
 $action = New-ScheduledTaskAction -Execute "node" -Argument '"${executorPath}" "${absoluteTaskPath}"'
 $trigger = New-ScheduledTaskTrigger -Daily -At "${trigger.time || '00:00'}"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType Interactive
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
 Write-Host "Task registered: $taskName"
@@ -199,6 +214,10 @@ export function registerTask(
       console.log('Warning: claude-code not found in PATH - CLI tasks may fail');
     }
 
+    // Detect node path for Task Scheduler (needs full path)
+    const nodePath = detectNodePath();
+    console.log(`Using node at: ${nodePath}`);
+
     // Build arguments: executor.js taskPath [claudeCodePath]
     const executorArgs = claudeCodePath
       ? `"${executorPath}" "${absoluteTaskPath}" "${claudeCodePath}"`
@@ -207,10 +226,10 @@ export function registerTask(
     // Build PowerShell registration script
     const psScript = `
 $ErrorActionPreference = 'Stop'
-$action = New-ScheduledTaskAction -Execute "node" -Argument '${executorArgs}'
+$action = New-ScheduledTaskAction -Execute "${nodePath}" -Argument '${executorArgs}'
 $trigger = New-ScheduledTaskTrigger -Daily -At "${trigger.time || '00:00'}"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
 Register-ScheduledTask -TaskName "CronClaude_${taskId}" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
 Write-Host "Task registered successfully"
 `.trim();
