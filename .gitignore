@@ -12,3 +12,10 @@ dist/
 # Runtime generated files
 logs/
 tasks/
+*.tmp
+tmp/
+temp/
+
+# Debug output
+debug/
+*.debug.log
