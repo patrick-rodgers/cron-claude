@@ -8,3 +8,7 @@ dist/
 
 # Local Claude settings
 .claude/settings.local.json
+
+# Runtime generated files
+logs/
+tasks/
